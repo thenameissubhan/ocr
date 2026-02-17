@@ -4,7 +4,7 @@ PHASE 2: ROW OCR EXTRACTOR  +  GEMINI AI CORRECTION  (v4)
 EasyOCR extracts rows  ->  Gemini Flash sees the image and fixes OCR errors.
 
 Requirements:
-    pip install easyocr opencv-python pillow pandas openpyxl numpy google-generativeai
+    pip install easyocr opencv-python pillow pandas openpyxl numpy google-genai
 """
 
 import warnings
@@ -30,9 +30,10 @@ import easyocr
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# Gemini
+# Gemini  (new google-genai SDK)
 try:
-    import google.generativeai as genai
+    from google import genai as google_genai
+    from google.genai import types as genai_types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -335,7 +336,7 @@ class Phase2OCRExtractor:
 
         if not GEMINI_AVAILABLE:
             tk.Label(s_ai,
-                     text="google-generativeai not installed.\nRun:  pip install google-generativeai",
+                     text="google-genai not installed.\nRun:  pip install google-genai",
                      bg=C_BG, fg=C_RED, font=("Segoe UI", 8),
                      justify=tk.LEFT).pack(anchor="w")
         
@@ -599,7 +600,7 @@ class Phase2OCRExtractor:
     def test_ai_connection(self):
         if not GEMINI_AVAILABLE:
             messagebox.showerror("Missing Library",
-                                  "Run:  pip install google-generativeai")
+                                  "Run:  pip install google-genai")
             return
         key = self.gemini_api_key.get().strip()
         if not key:
@@ -610,14 +611,16 @@ class Phase2OCRExtractor:
 
     def _do_test_ai(self, key):
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(self.gemini_model.get())
-            resp  = model.generate_content("Reply with exactly: OK")
-            txt   = resp.text.strip()
+            client = google_genai.Client(api_key=key)
+            resp   = client.models.generate_content(
+                model=self.gemini_model.get(),
+                contents="Reply with exactly: OK"
+            )
+            txt = resp.text.strip()
             if "OK" in txt:
                 self.root.after(0, lambda: self.lbl_ai_status.config(
                     text="Connected! Gemini is ready.", fg=C_ACCENT))
-                self._gemini_client = model
+                self._gemini_client = client
             else:
                 self.root.after(0, lambda: self.lbl_ai_status.config(
                     text=f"Unexpected reply: {txt}", fg=C_ORANGE))
@@ -626,14 +629,13 @@ class Phase2OCRExtractor:
                 text=f"Error: {e}", fg=C_RED))
 
     def _get_gemini_client(self):
-        """Return a fresh Gemini client (re-creates if needed)."""
+        """Return a fresh google.genai Client."""
         if not GEMINI_AVAILABLE:
             return None
         key = self.gemini_api_key.get().strip()
         if not key:
             return None
-        genai.configure(api_key=key)
-        return genai.GenerativeModel(self.gemini_model.get())
+        return google_genai.Client(api_key=key)
 
     # ═══════════════════════ AI CORRECTION ═══════════════════════
 
@@ -676,8 +678,11 @@ Look carefully at the image to correct each row. Return ONLY a JSON array of cor
         try:
             import PIL.Image as PILImage
             import io
-            pil_img = PILImage.open(io.BytesIO(img_bytes))
-            response = client.generate_content([prompt, pil_img])
+            pil_img  = PILImage.open(io.BytesIO(img_bytes))
+            response = client.models.generate_content(
+                model=self.gemini_model.get(),
+                contents=[prompt, pil_img],
+            )
             raw_json = response.text.strip()
 
             # Strip markdown code fences if present
